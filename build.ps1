@@ -50,8 +50,14 @@ New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 $sources = Get-ChildItem -Path $srcDir -Filter "*.java" | ForEach-Object { $_.FullName }
 if ($sources.Count -eq 0) { throw "No Java sources found in $srcDir" }
 
-Write-Host "Compiling $($sources.Count) Java sources (--release 8)..."
-& $javac -Xlint:-options --release 8 -encoding UTF-8 -cp $logisim -d $buildDir $sources
+$verOut = (& $javac -version 2>&1) -join "`n"
+$targetFlags = @("-Xlint:-options", "--release", "8")
+if ($verOut -match '1\.8\.') {
+    $targetFlags = @("-source", "1.8", "-target", "1.8")
+}
+
+Write-Host "Compiling $($sources.Count) Java sources..."
+& $javac @targetFlags -encoding UTF-8 -cp $logisim -d $buildDir $sources
 if ($LASTEXITCODE -ne 0) { throw "javac failed with exit code $LASTEXITCODE" }
 
 Write-Host "Packaging $outJar..."

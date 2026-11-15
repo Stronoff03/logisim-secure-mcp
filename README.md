@@ -1,100 +1,101 @@
 # Logisim Secure MCP
 
-A production-oriented Model Context Protocol (MCP) server and in-process JVM bridge for **Logisim 2.7.1**, engineered with **zero third-party Python or Java runtime dependencies** (pure Python 3 stdlib + pure Java 8 stdlib).
+An MCP (Model Context Protocol) server and local JVM bridge for Logisim 2.7.1. Built purely on the Python 3 and Java 8 standard libraries with no third party runtime dependencies.
 
-It enables AI coding agents to design, route, package, audit, test, synthesize, and visually inspect digital logic circuits directly inside a live Logisim GUI session.
+It lets AI coding assistants build, wire, package, audit, test, synthesize, and inspect digital logic circuits directly inside a running Logisim GUI window.
 
-> **Disclosure:** This project was designed and built with AI assistance.
+Note: This project was developed with AI assistance.
 
----
+## Overview
 
-## Features & Architecture
+### MCP Server (`server/`)
+- Implements the MCP `stdio` JSON-RPC protocol (`2025-03-26`, `2024-11-05`) over both newline delimited and `Content-Length` stdio framing.
+- Exposes 43 structured tools alongside built in design notes (`logisim_guide`) and workflow prompt templates.
+- Checks every outgoing tool call and nested `logisim_batch` operation against Draft-07 schemas in Python (`server/schema_check.py`) before forwarding requests to Java.
 
-### 1. Zero-Dependency MCP Server (`server/`)
-- Implements the MCP `stdio` JSON-RPC protocol (`2025-03-26` / `2024-11-05`) over both newline-delimited and `Content-Length` stdio transports.
-- Exposes **43 structured MCP tools**, plus built-in design handbook resources (`logisim_guide`) and workflow prompt templates.
-- Validates every outgoing tool call and nested `logisim_batch` operation against explicit Draft-07 JSON schemas in Python (`server/schema_check.py`) before hitting the JVM bridge.
+### Layout and Routing (`server/layout_helper.py`, `CircuitLayoutOps.java`)
+- **Component and port lookup (`logisim_describe_component`):** Resolves symbolic port aliases (`Adder.cin`, `Register.clk`, `RAM.we`, subcircuit pin names), pin offsets, bit widths, and enum attributes.
+- **Undoable batch builds (`logisim_batch`):** Combines component placement, wiring, tunnel fanouts, attribute edits, and subcircuit packaging into a single Logisim undo transaction with `ref` aliases, optional auto tidy (`tidy_after`), DRC (`audit_after`), and screenshots (`screenshot_after`).
+- **Spacing and routing (`logisim_connect`, `logisim_arrange`, `logisim_fanout_tunnels`):**
+  - Uses an orthogonal A* router (`route="auto"`) that avoids component bounding boxes and foreign pins to prevent accidental shorts.
+  - Supports labeled `Tunnel` wiring (`mode="tunnel"`) with automatic bit width matching and outward label alignment.
+  - Creates bit sliced `Splitter` hubs paired with staggered `Tunnel` labels in one call (`logisim_fanout_tunnels`).
+  - Arranges existing blocks cleanly with `logisim_arrange` (`row`, `column`, `grid`, `align`, `distribute`, `tidy`).
+- **Subcircuit IC packaging (`logisim_configure_appearance`):** Generates clean rectangular or rounded IC symbols with ordered side pins, pin labels, notch, and title.
 
-### 2. Layout & Routing Engine (`server/layout_helper.py` & `CircuitLayoutOps.java`)
-- **Semantic Component & Port Metadata (`logisim_describe_component`):** Resolves symbolic port aliases (`Adder.cin`, `Register.clk`/`D`/`en`, `RAM.we`/`oe`/`clr`, custom subcircuit pin labels), exact port offsets, bit widths, and attribute option lists (`JComboBox` enums).
-- **Atomic Undoable Transactions (`logisim_batch`):** Groups component placement, semantic wiring, tunnel fanouts, attribute updates, and custom subcircuit packaging into a single undoable Logisim project transaction with `ref` aliases, optional post-build auto-tidy (`tidy_after`), DRC (`audit_after`), and live screenshot (`screenshot_after`).
-- **Balanced Readable Spacing & A\* Routing (`logisim_connect`, `logisim_arrange`, `logisim_fanout_tunnels`):**
-  - Bounds-aware `A*` orthogonal router (`route="auto"`) keeps clear of component bodies and foreign pins to prevent accidental shorts or wire-over-port crossings.
-  - Auto-oriented labeled `Tunnel` placement (`mode="tunnel"`) matches bit widths automatically and points labels outward so text never covers chips.
-  - `logisim_fanout_tunnels` constructs bit-sliced `Splitter` hubs paired with staggered, readable `Tunnel` arrays in a single call.
-  - `logisim_arrange` (`row`, `column`, `grid`, `align`, `distribute`, `tidy`) normalizes spacing and preserves clean breathing room (`gap_x` / `gap_y`) around components.
-- **Custom Subcircuit IC Packaging (`logisim_configure_appearance`):** Generates clean, grid-aligned IC symbols (`rect`, `roundrect`, `rounded`) with `west`/`east`/`north`/`south` pin distribution, pin labels, notch, and titles.
-
-### 3. Verification, Synthesis & Live Visual Feedback (`CircuitAuditor.java`, `SimAndSynthOps.java`)
-- **Static & Live Design Rule Check (`logisim_audit_circuit`):** Audits single circuits or recursively across all subcircuits for `signal_error` (`E`), `oscillation_detected`, `unclocked_sequential`, `floating_required_input`, `tunnel_orphan` (with fuzzy typo suggestions), `tunnel_width_mismatch`, `wire_passes_through_port`, `component_overlap`, and `subcircuit_pin_mismatch`.
-- **Cycle-Accurate Test Bench (`logisim_test_bench` & `logisim_inspect_state`):** Runs multi-step/multi-cycle vector tables supporting `set`, `set_mem`, `tick` (clock cycles), `half_ticks`, `expect`, `expect_mem`, hierarchical `Subcircuit.Signal` inspection, `0b10x1` wildcard masks, and step traces.
-- **Combinational Analysis & Synthesis (`logisim_truth_table`, `logisim_analyze_circuit`, `logisim_synthesize_circuit`):** Extracts truth tables and minimized SOP Boolean expressions from existing combinational circuits, or synthesizes clean multi-output gate networks from Boolean formulas or truth tables.
-- **Live Annotated Screenshots (`logisim_screenshot`):** Renders live simulation colors from Logisim's active `CircuitState` with optional DRC error callouts and port overlays, returned directly as MCP `ImageContent`.
-
----
+### Verification, Synthesis, and Screenshots (`CircuitAuditor.java`, `SimAndSynthOps.java`)
+- **Design rule checker (`logisim_audit_circuit`):** Audits a single circuit or recursively checks all subcircuits for `signal_error` (`E`), oscillations, unclocked sequential elements, floating required inputs, orphan tunnels (with typo suggestions), width mismatches, wires crossing foreign pins, overlapping components, and subcircuit pin mismatches.
+- **Test bench and state inspection (`logisim_test_bench`, `logisim_inspect_state`):** Runs stepped test vectors (`set`, `set_mem`, `tick`, `half_ticks`, `expect`, `expect_mem`, `0b10x1` wildcards) and inspects nested subcircuit values.
+- **Combinational analysis and synthesis (`logisim_truth_table`, `logisim_analyze_circuit`, `logisim_synthesize_circuit`):** Extracts truth tables and minimized Boolean SOP expressions from combinational circuits, or generates gate networks directly from Boolean formulas or truth tables.
+- **Live screenshots (`logisim_screenshot`):** Renders the active `CircuitState` with wire colors and optional error callouts or port overlays, returned to MCP clients as PNG image content.
 
 ## Security Model
 
-1. **Loopback-Only Transport:** Both the Java bridge server and Python client strictly bind and connect only to `127.0.0.1` using length-prefixed JSON framing (`MAX_FRAME_BYTES = 32 MiB`).
-2. **External Shared Secret (Out of Repo):** A 256-bit shared hex secret is generated at runtime in `~/.logisim-mcp/bridge.key` (configurable via `LOGISIM_MCP_DIR`) with owner-restricted permissions (`chmod 0600` on POSIX / owner ACLs on Windows). No API keys, tokens, or secrets are stored in this repository.
-3. **Mutual HMAC-SHA256 Authentication:** Every local TCP connection performs a two-way random-nonce HMAC-SHA256 challenge-response handshake (`logisim-mcp:c2s:...` and `logisim-mcp:s2c:...`) before accepting any command.
-4. **Ephemeral Discovery Metadata:** `~/.logisim-mcp/bridge.json` records only loopback host, port, protocol version, version string, and PID—never secret material.
+1. **Loopback only:** Both the Java bridge server and Python client bind and connect strictly on `127.0.0.1` using length prefixed JSON frames (`MAX_FRAME_BYTES = 32 MiB`).
+2. **Runtime shared key:** A 256 bit hex secret is generated at runtime in `~/.logisim-mcp/bridge.key` (or `LOGISIM_MCP_DIR`) with owner only permissions (`chmod 0600` on POSIX, owner ACLs on Windows). No API keys, tokens, or secrets are stored in this repository.
+3. **Mutual HMAC-SHA256 handshake:** Every TCP connection runs a bidirectional random nonce HMAC-SHA256 verification (`logisim-mcp:c2s:...` and `logisim-mcp:s2c:...`) before any command is accepted.
+4. **Ephemeral discovery file:** `~/.logisim-mcp/bridge.json` stores only the loopback address, port, protocol version, version string, and PID.
 
----
-
-## Project Structure
+## Repository Layout
 
 ```text
 logisim-secure-mcp/
-├── build.ps1                          # Windows JDK build script for the Java 8 bridge JAR
-├── start_logisim_with_mcp.bat         # Convenience launcher for Logisim with bridge loaded
+├── build.py                           # Cross platform JDK build script (JDK 8+)
+├── build.ps1                          # Windows PowerShell build helper
+├── start_logisim_with_mcp.bat         # Windows helper to launch Logisim with the bridge loaded
 ├── java/
-│   ├── MANIFEST.MF                    # Premain/Agent/Main manifest
+│   ├── MANIFEST.MF                    # Premain, Agentmain, and Main manifest
 │   └── src/logisimmcp/
-│       ├── BridgeServer.java          # Localhost TCP server & request dispatcher
+│       ├── BridgeServer.java          # Localhost TCP server and request dispatcher
 │       ├── CircuitAuditor.java        # Recursive DRC engine
-│       ├── CircuitLayoutOps.java      # A* routing, splitters, fanouts, arrangement, appearance
-│       ├── Commands.java              # Bridge command handlers & transactions
-│       ├── ComponentMeta.java         # Logisim component/port/attribute reflection
-│       ├── Json.java                  # Zero-dependency JSON parser/serializer
-│       ├── Launcher.java              # Logisim startup & dynamic JVM attach entrypoint
+│       ├── CircuitLayoutOps.java      # A* routing, splitters, fanouts, layout, appearance
+│       ├── Commands.java              # Bridge command handlers and transactions
+│       ├── ComponentMeta.java         # Logisim component, port, and attribute reflection
+│       ├── Json.java                  # Standalone JSON parser and serializer
+│       ├── Launcher.java              # Logisim startup and dynamic JVM attach entrypoint
 │       ├── SimAndSynthOps.java        # Test bench, state inspection, synthesis, screenshots
-│       └── WireProtocol.java          # Framed transport & mutual HMAC-SHA256 handshake
+│       └── WireProtocol.java          # Framed transport and mutual HMAC-SHA256 handshake
 ├── server/
 │   ├── __init__.py
-│   ├── bridge_client.py               # Thread-safe bridge client & Logisim process launcher
-│   ├── guide.py                       # Built-in MCP tool handbook & best practices
-│   ├── layout_helper.py               # Client-side spacing/routing & batch helpers
+│   ├── bridge_client.py               # Thread safe bridge client and Logisim launcher
+│   ├── guide.py                       # Built in MCP tool handbook
+│   ├── layout_helper.py               # Client side spacing, routing, and batch helpers
 │   ├── logisim_mcp_server.py          # MCP stdio JSON-RPC server entrypoint
-│   ├── prompts.py                     # Reusable workflow prompts
+│   ├── prompts.py                     # Workflow prompts
 │   ├── schema_check.py                # Draft-07 JSON Schema validator
-│   ├── tool_schemas.py                # Tool & batch operation definitions (43 tools)
-│   └── wire.py                        # Framed wire protocol & HMAC client handshake
+│   ├── tool_schemas.py                # Tool and batch schemas (43 tools)
+│   └── wire.py                        # Wire framing and HMAC client handshake
 └── tests/
     ├── test_protocol_and_schemas.py   # Offline unit tests (wire, HMAC, schemas, MCP stdio)
-    └── test_logisim_e2e.py            # Live Logisim JVM end-to-end integration tests
+    └── test_logisim_e2e.py            # Live Logisim JVM integration tests
 ```
 
----
+## Setup and Usage
 
-## Prerequisites & Setup
+### Requirements
 
-- **Logisim 2.7.1** (`logisim-win-2.7.1.exe` or `logisim-generic-2.7.1.jar`)
-- **Python 3.10+**
-- **Java 8+ JDK** (targets `--release 8` to compile `logisim-mcp-bridge.jar` and support `logisim_attach`)
+- Logisim 2.7.1 (`logisim-win-2.7.1.exe` or `logisim-generic-2.7.1.jar`)
+- Python 3.10+
+- Java 8+ JDK (needed to compile `logisim-mcp-bridge.jar` and use `logisim_attach`)
 
-### Environment Variables (Optional)
+### 1. Build the Java Bridge
 
-| Variable | Purpose |
-| :--- | :--- |
-| `LOGISIM_EXE` | Path to `logisim-win-2.7.1.exe` or `logisim-generic-2.7.1.jar` |
-| `LOGISIM_JAVA_EXE` | Path to `javaw` / `java` used to start Logisim GUI |
-| `LOGISIM_BRIDGE_JAR` | Custom path to `logisim-mcp-bridge.jar` |
-| `LOGISIM_MCP_DIR` | Override runtime directory for `bridge.key` and `bridge.json` (defaults to `~/.logisim-mcp`) |
+Before running the MCP server for the first time, compile `logisim-mcp-bridge.jar` from source (works on Windows, macOS, and Linux with JDK 8 or newer):
 
-### MCP Client Configuration
+```bash
+python build.py
+```
 
-Add the following server entry to your MCP client configuration (replacing `<path-to-repo>` and `<path-to-logisim>` with your local paths):
+On Windows PowerShell, you can also run:
+
+```powershell
+$env:LOGISIM_EXE = "C:\path\to\logisim-win-2.7.1.exe"
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+### 2. Configure Your MCP Client
+
+Add the server to your MCP client configuration (replace `<path-to-repo>` and `<path-to-logisim>` with your local paths):
 
 ```json
 {
@@ -112,24 +113,24 @@ Add the following server entry to your MCP client configuration (replacing `<pat
 }
 ```
 
-### Building the Java Bridge
+### Optional Environment Variables
 
-Before first use, compile `logisim-mcp-bridge.jar` in the repository root (targeting `--release 8` on Windows):
-
-```powershell
-$env:LOGISIM_EXE = "C:\path\to\logisim-win-2.7.1.exe"
-powershell -ExecutionPolicy Bypass -File .\build.ps1
-```
+| Variable | Description |
+| :--- | :--- |
+| `LOGISIM_EXE` | Path to `logisim-win-2.7.1.exe` or `logisim-generic-2.7.1.jar` |
+| `LOGISIM_JAVA_EXE` | Path to `javaw` or `java` used to start the Logisim GUI |
+| `LOGISIM_BRIDGE_JAR` | Custom path to `logisim-mcp-bridge.jar` |
+| `LOGISIM_MCP_DIR` | Override runtime directory for `bridge.key` and `bridge.json` (defaults to `~/.logisim-mcp`) |
 
 ### Running Tests
 
-Run the offline protocol, HMAC authentication, JSON schema, and MCP server unit tests:
+Offline protocol, HMAC handshake, schema validation, and MCP stdio framing tests:
 
 ```bash
 python -m unittest discover -s tests -p "test_protocol*.py" -v
 ```
 
-Run the full live Logisim end-to-end test suite (requires `LOGISIM_EXE` / Logisim 2.7.1 installed):
+Live Logisim JVM integration tests (requires Logisim 2.7.1 installed):
 
 ```bash
 python -m unittest discover -s tests -p "test_logisim_e2e.py" -v

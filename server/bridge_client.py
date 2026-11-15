@@ -122,7 +122,9 @@ class LogisimBridgeClient:
         if not logisim_exe.is_file():
             raise FileNotFoundError(f"Logisim executable not found: {logisim_exe}")
         if not bridge_jar.is_file():
-            raise FileNotFoundError(f"Bridge JAR not found: {bridge_jar}. Run build.ps1 first.")
+            raise FileNotFoundError(
+                f"Bridge JAR not found: {bridge_jar}. Run 'python build.py' (or 'build.ps1' on Windows) first."
+            )
 
         # Pre-create secret key and remove stale discovery file before launching JVM
         wire.load_or_create_key()
@@ -297,4 +299,20 @@ class LogisimBridgeClient:
                     return int(txt)
             except Exception:
                 pass
+            return None
+
+        # POSIX (Linux / macOS) fallback via pgrep or ps
+        try:
+            res = subprocess.run(
+                ["pgrep", "-f", "logisim.*\\.jar|com\\.cburch\\.logisim\\.Main"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if re.fullmatch(r"\d+", line):
+                    return int(line)
+        except Exception:
+            pass
         return None
