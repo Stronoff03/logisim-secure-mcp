@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+
+# Java build artifacts
+java/build/
+*.class
+*.jar
+
+# Secrets, keys, environment & runtime state
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+bridge.key*
+bridge.json*
+.logisim-mcp/
+mcp_config.json
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & temporary files
+*.log
+*.tmp
+tmp/
